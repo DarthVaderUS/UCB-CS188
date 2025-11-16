@@ -296,13 +296,27 @@ class CornersProblem(search.SearchProblem):
         space)
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+
+        startPos = self.startingPosition  
+        visited = (False, False, False, False)
+        for i, corner in enumerate(self.corners):
+            if startPos == corner:
+                visited[i] = True
+        return (startPos, tuple(visited))
+    
 
     def isGoalState(self, state: Any):
         """
         Returns whether this search state is a goal state of the problem.
         """
         "*** YOUR CODE HERE ***"
+
+        start, visited = state
+        for i in visited:
+            if i == False:
+                return False
+        return True
+
         util.raiseNotDefined()
 
     def getSuccessors(self, state: Any):
@@ -326,6 +340,28 @@ class CornersProblem(search.SearchProblem):
             #   hitsWall = self.walls[nextx][nexty]
 
             "*** YOUR CODE HERE ***"
+
+            currentPos, visited = state
+            x, y = currentPos
+            
+            dx, dy = Actions.directionToVector(action)
+            nextx, nexty = int(x + dx), int(y + dy)
+
+            # Skip when we face the wall
+            if self.walls[nextx][nexty]:
+                continue
+
+            nextPos = (nextx, nexty)
+
+             # update visited tuple
+            visitedList = list(visited)
+            for i, corner in enumerate(self.corners):
+                if nextPos == corner:
+                    visitedList[i] = True
+            nextVisited = tuple(visitedList)
+
+            nextState = (nextPos, nextVisited)
+            successors.append((nextState, action, 1))
 
         self._expanded += 1 # DO NOT CHANGE
         return successors
@@ -362,7 +398,52 @@ def cornersHeuristic(state: Any, problem: CornersProblem):
     walls = problem.walls # These are the walls of the maze, as a Grid (game.py)
 
     "*** YOUR CODE HERE ***"
-    return 0 # Default to trivial solution
+    # Search nodes expanded: 774 !!!
+
+
+    position, visited = state
+    unvisited = [corners[i] for i in range(4) if not visited[i]]
+
+    # We have visited all corners
+    if not unvisited:
+        return 0
+    
+    # Calculate the manhattan_distance of two points
+    def manhattanDistance(p1, p2):
+        return abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
+    
+    # First step: find the nearest unvisited corner
+    curToCorner = min(manhattanDistance(position, c) for c in unvisited)
+
+    # Second step: approximate the cost to visit all remaining corners
+    # Using MST (Kruskal)
+    parent = list(range(len(unvisited)))
+
+    def find(x):
+        if(parent[x]!=x):
+            parent[x] = find(parent[x])
+        return parent[x]
+    
+    def union(x, y):
+        pa, pb = find(x), find(y)
+        parent[pa] = pb
+    
+    edges = []
+    for i in range(len(unvisited)):
+        for j in range(i+1, len(unvisited)):
+            dist = manhattanDistance(unvisited[i], unvisited[j])
+            edges.append((dist, i, j))
+    
+    edges.sort()
+
+    mstCost = 0
+    for dist, i, j in edges:
+        if find(i) != find(j):
+            union(i, j)
+            mstCost += dist
+    
+    # Final heuristic value
+    return curToCorner + mstCost
 
 
 
@@ -453,7 +534,68 @@ def foodHeuristic(state: Tuple[Tuple, List[List]], problem: FoodSearchProblem):
     """
     position, foodGrid = state
     "*** YOUR CODE HERE ***"
-    return 0
+    foodList = foodGrid.asList()
+
+    # No food left => goal already reached
+    if not foodList:
+        return 0
+    
+    # helper: cache dict for pairwise distances
+    # key: ((x1,y1),(x2,y2)) with order normalized
+    info = problem.heuristicInfo
+    if 'distCache' not in info:
+        info['distCache'] = {}
+    distCache = info['distCache']
+
+    def pairKey(a, b):
+        return (a, b) if a <= b else (b, a)
+
+    def mazeDist(a, b):
+        """Return cached maze distance or compute+cache it."""
+        key = pairKey(a, b)
+        if key in distCache:
+            return distCache[key]
+        # problem.getMazeDistance uses BFS through walls and returns exact shortest path
+        d = mazeDistance(a, b, problem.startingGameState)
+        distCache[key] = d
+        return d
+    
+    if len(foodList) == 1:
+        return mazeDist(position, foodList[0])
+    
+    # First step: distance from current position to the nearest food
+    disToNearestFood = min(mazeDist(position, f) for f in foodList)
+
+    # Second step: compute MST cost among all remaining food
+
+    k = len(foodList)
+    edges = []
+    for i in range(k):
+        for j in range(i + 1, k):
+            d = mazeDist(foodList[i], foodList[j])
+            edges.append((d, i, j))
+    edges.sort(key=lambda x: x[0])
+
+    parent = list(range(k))
+
+    def find(x):
+        if(parent[x] != x):
+            parent[x] = find(parent[x])
+        return parent[x]
+    
+    def union(x, y):
+        pa, pb = find(x), find(y)
+        if(pa != pb):
+            parent[pb] = pa
+    
+    mstCost = 0
+    for d, i, j in edges:
+        if find(i) != find(j):
+            union(i, j)
+            mstCost += d
+        
+    return disToNearestFood + mstCost
+
 
 
 class ClosestDotSearchAgent(SearchAgent):
@@ -485,7 +627,10 @@ class ClosestDotSearchAgent(SearchAgent):
         problem = AnyFoodSearchProblem(gameState)
 
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        if not food.count():
+            return []
+        return search.bfs(problem)
+
 
 class AnyFoodSearchProblem(PositionSearchProblem):
     """
@@ -521,7 +666,8 @@ class AnyFoodSearchProblem(PositionSearchProblem):
         x,y = state
 
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        return self.food[x][y]
+        
 
 def mazeDistance(point1: Tuple[int, int], point2: Tuple[int, int], gameState: pacman.GameState) -> int:
     """
